@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能体聊天室 · Agent Chat</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0a0a0f; color: #e8e8f0; height: 100vh; height: 100dvh; display: flex; overflow: hidden;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background: radial-gradient(ellipse 70% 50% at 15% 50%, rgba(99,102,241,0.06) 0%, transparent 60%),
+                radial-gradient(ellipse 70% 50% at 85% 50%, rgba(245,158,11,0.06) 0%, transparent 60%);
+    pointer-events: none; z-index: 0;
+  }
+
+  /* Sidebar */
+  .sidebar { position: relative; z-index: 10; width: 280px; min-width: 280px; background: rgba(12,12,20,0.95); border-right: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; backdrop-filter: blur(12px); transition: width 0.3s ease, min-width 0.3s ease, opacity 0.3s ease; overflow: hidden; }
+  .sidebar.collapsed { width: 0; min-width: 0; border-right: none; opacity: 0; }
+  .sidebar .sidebar-inner { min-width: 280px; display: flex; flex-direction: column; height: 100%; }
+  .sidebar.collapsed .sidebar-inner { pointer-events: none; }
+
+  /* Sidebar toggle - fixed top-left */
+  .btn-sidebar-toggle { position: fixed; z-index: 20; left: 8px; top: 8px; background: rgba(12,12,20,0.7); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.4); cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 6px; transition: all 0.2s; backdrop-filter: blur(8px); line-height: 1.4; }
+  .btn-sidebar-toggle:hover { color: rgba(255,255,255,0.7); background: rgba(12,12,20,0.9); }
+
+  .sidebar-header { padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.06); text-align: center; }
+  .sidebar-header h1 { font-size: 15px; font-weight: 600; background: linear-gradient(135deg, #818cf8, #fbbf24); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sidebar-header .sub { font-size: 11px; color: rgba(255,255,255,0.25); letter-spacing: 1.5px; margin-top: 2px; }
+  .sidebar-actions { padding: 12px; }
+  .sidebar-actions button { width: 100%; padding: 10px; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.5); font-size: 13px; cursor: pointer; transition: all 0.2s; }
+  .sidebar-actions button:hover { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.3); color: #818cf8; }
+  .session-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+  .session-list::-webkit-scrollbar { width: 3px; }
+  .session-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+  .session-item { padding: 12px; margin-bottom: 4px; border-radius: 8px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+  .session-item:hover { background: rgba(255,255,255,0.04); }
+  .session-item.active { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.2); }
+  .session-item .s-name { font-size: 13px; font-weight: 500; margin-bottom: 3px; display: flex; align-items: center; gap: 6px; }
+  .session-item .s-topic { font-size: 11px; color: rgba(255,255,255,0.3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-item .s-agents { display: flex; gap: 2px; margin-top: 5px; font-size: 11px; flex-wrap: wrap; }
+  .session-item .s-agents span { padding: 1px 5px; border-radius: 4px; font-size: 10px; background: rgba(255,255,255,0.05); }
+  .session-item .s-count { font-size: 10px; color: rgba(255,255,255,0.2); margin-left: auto; }
+
+  .main { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-width: 0; height: 100vh; height: 100dvh; min-height: 0; }
+  .welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: rgba(255,255,255,0.15); }
+  .welcome .icon { font-size: 48px; opacity: 0.3; }
+  .welcome p { font-size: 14px; }
+
+  /* Session Header */
+  .session-header { padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(10,10,15,0.8); backdrop-filter: blur(12px); flex-shrink: 0; }
+  .session-header .sh-title { font-size: 15px; font-weight: 600; }
+  .session-header .sh-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12px; color: rgba(255,255,255,0.35); }
+  .session-header .sh-meta .topic { color: rgba(255,255,255,0.5); }
+
+  .agent-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .agent-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px 3px 8px; border-radius: 12px; font-size: 12px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); transition: all 0.3s ease; }
+  .agent-chip.external { border-style: dashed; }
+  .agent-chip.speaking { transform: scale(1.08); box-shadow: 0 0 12px currentColor; }
+  .agent-dot { width: 6px; height: 6px; border-radius: 50%; transition: all 0.3s; }
+  .agent-chip.speaking .agent-dot { animation: glow 0.8s ease-in-out infinite; }
+  @keyframes glow { 0%,100%{box-shadow:0 0 3px currentColor} 50%{box-shadow:0 0 10px currentColor,0 0 18px currentColor} }
+
+  /* Controls */
+  .controls { display: flex; gap: 8px; padding: 10px 20px; border-bottom: 1px solid rgba(255,255,255,0.04); background: rgba(10,10,15,0.5); flex-shrink: 0; align-items: center; }
+  .controls button { padding: 7px 18px; border-radius: 6px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+  .btn-next { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; }
+  .btn-next:hover { transform: translateY(-1px); box-shadow: 0 3px 12px rgba(99,102,241,0.3); }
+  .btn-next:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn-auto { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.15); }
+  .btn-auto.active { background: rgba(245,158,11,0.25); }
+  .controls .msg-count { font-size: 12px; color: rgba(255,255,255,0.2); margin-left: auto; }
+
+  /* Invite badge */
+  .invite-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px 10px; border-radius: 6px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.2s; }
+  .invite-badge:hover { background: rgba(16,185,129,0.2); }
+
+  /* Chat */
+  .chat-area { flex: 1; overflow-y: auto; padding: 16px 20px 60px; scroll-behavior: smooth; }
+  .chat-area::-webkit-scrollbar { width: 4px; }
+  .chat-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  .chat-empty-msg { text-align: center; color: rgba(255,255,255,0.12); padding: 40px 20px; font-size: 13px; }
+
+  .message { display: flex; gap: 10px; margin-bottom: 14px; animation: msg-in 0.35s ease-out; opacity: 0; animation-fill-mode: forwards; }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  .msg-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .msg-body { min-width: 0; }
+  .msg-name { font-size: 11px; font-weight: 600; margin-bottom: 3px; letter-spacing: 0.3px; }
+  .msg-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; font-weight: 400; }
+  .msg-badge.ai { background: rgba(99,102,241,0.15); color: #818cf8; }
+  .msg-badge.ext { background: rgba(16,185,129,0.15); color: #34d399; }
+  .msg-bubble { display: inline-block; padding: 10px 14px; border-radius: 12px; max-width: 520px; line-height: 1.6; font-size: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); word-break: break-word; }
+
+  /* Typing */
+  .typing { padding: 4px 20px 12px; flex-shrink: 0; display: none; }
+  .typing.active { display: flex; }
+  .typing-box { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; background: rgba(255,255,255,0.04); }
+  .typing-dots span { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.25); animation: dot 1.2s ease-in-out infinite; margin-right: 3px; }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dot { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+  .typing-label { font-size: 12px; color: rgba(255,255,255,0.3); }
+
+  /* Modal */
+  .modal-overlay { display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #14141f; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; width: 420px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .modal h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+  .modal label { display: block; font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
+  .modal input { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.05); color: #e8e8f0; font-size: 13px; outline: none; margin-bottom: 12px; }
+  .modal input:focus { border-color: rgba(99,102,241,0.3); }
+  .agent-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px; }
+  .agent-pick { padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.03); cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; font-size: 13px; color: rgba(255,255,255,0.5); }
+  .agent-pick:hover { background: rgba(255,255,255,0.06); }
+  .agent-pick.selected { border-color: currentColor; background: rgba(255,255,255,0.06); color: #e8e8f0; }
+  .agent-pick .ap-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-actions button { padding: 8px 20px; border-radius: 6px; border: none; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+  .modal-actions .btn-cancel { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); }
+  .modal-actions .btn-create { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; }
+  .modal-actions .btn-create:hover { box-shadow: 0 3px 12px rgba(99,102,241,0.3); }
+  .modal-actions .btn-create:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 8px; font-size: 13px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.2); color: #34d399; z-index: 200; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 700px) { .sidebar { width: 200px; min-width: 200px; } .agent-picker { grid-template-columns: 1fr; } .msg-bubble { max-width: 85vw; } }
+</style>
+</head>
+<body>
+
+<button class="btn-sidebar-toggle" onclick="toggleSidebar()" title="切换侧栏">☰</button>
+
+<!-- Sidebar -->
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-inner">
+    <div class="sidebar-header">
+      <div><h1>🎭 智能体聊天室</h1><div class="sub">AGENT CHATROOM</div></div>
+    </div>
+    <div class="sidebar-actions">
+      <button onclick="showCreateModal()">＋ 创建新会话</button>
+    </div>
+    <div class="session-list" id="sessionList">
+      <div style="padding:30px 10px;text-align:center;font-size:12px;color:rgba(255,255,255,0.12)">暂无会话</div>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div class="welcome" id="welcome">
+    <div class="icon">💬</div>
+    <p>选择一个会话，或创建一个新的</p>
+  </div>
+
+  <div id="sessionView" style="display:none;flex-direction:column;height:100%;min-height:0;">
+    <div class="session-header">
+      <div class="sh-title" id="sessionTitle">新对话</div>
+      <div class="sh-meta">
+        <span id="sessionAgents"></span>
+        <span>·</span>
+        <span class="topic" id="sessionTopic">话题</span>
+        <span style="flex:1"></span>
+        <span class="invite-badge" id="inviteBadge" onclick="copyInvite()">🔗 邀请智能体</span>
+      </div>
+      <div class="agent-row" id="agentRow"></div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-next" id="btnNext" onclick="nextSpeaker()">下一步 ➜</button>
+      <button class="btn-auto" id="btnAuto" onclick="toggleAuto()">▶ 自动</button>
+      <span class="msg-count" id="msgCount">0 条消息</span>
+    </div>
+
+    <div class="typing" id="typing">
+      <div class="typing-box">
+        <div class="typing-dots"><span></span><span></span><span></span></div>
+        <span class="typing-label" id="typingLabel">思考中...</span>
+      </div>
+    </div>
+
+    <div class="chat-area" id="chatArea">
+      <div class="chat-empty-msg">🤖 点击「下一步」开始对话</div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Modal -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <h2>🎯 创建新会话</h2>
+    <label>会话名称</label>
+    <input type="text" id="newName" value="深夜畅谈" placeholder="给你的对话起个名字" />
+    <label>话题</label>
+    <input type="text" id="newTopic" value="人工智能与人类意识" placeholder="输入讨论话题" />
+    <label>选择智能体（可选，留空则纯Hermes对讲模式）</label>
+    <div class="agent-picker" id="agentPicker"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideCreateModal()">取消</button>
+      <button class="btn-create" id="btnCreate" onclick="createSession()">创建并开始</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API_BASE = '/chat';
+let sessions = {};
+let currentSid = null;
+let currentAgents = {};
+let isRunning = false;
+let isAuto = false;
+let autoTimer = null;
+let sseSource = null;
+let pollInterval = null;
+let isUserScrolling = false;
+
+// ===== Init =====
+async function init() {
+  await loadAgentLibrary();
+  await loadSessions();
+}
+
+// ===== Agent Library =====
+async function loadAgentLibrary() {
+  const res = await fetch(`${API_BASE}/api/agents`);
+  currentAgents = await res.json();
+  renderAgentPicker();
+}
+
+function renderAgentPicker() {
+  const container = document.getElementById('agentPicker');
+  const entries = Object.entries(currentAgents);
+  container.innerHTML = entries.map(([id, a], i) => `
+    <div class="agent-pick ${i < 2 ? 'selected' : ''}"
+         data-id="${id}" onclick="toggleAgentPick('${id}')"
+         style="${i < 2 ? `color:${a.color};border-color:${a.color}40` : ''}">
+      <span class="ap-dot" style="background:${a.color}"></span>
+      ${a.emoji} ${a.name}
+    </div>
+  `).join('');
+}
+
+function toggleAgentPick(id) {
+  const el = document.querySelector(`.agent-pick[data-id="${id}"]`);
+  if (!el) return;
+  el.classList.toggle('selected');
+  const agent = currentAgents[id];
+  el.style.color = el.classList.contains('selected') ? agent.color : '';
+  el.style.borderColor = el.classList.contains('selected') ? agent.color + '40' : '';
+}
+
+// ===== Sessions =====
+async function loadSessions() {
+  const res = await fetch(`${API_BASE}/api/sessions`);
+  const list = await res.json();
+  renderSessionList(list);
+}
+
+function renderSessionList(list) {
+  const container = document.getElementById('sessionList');
+  if (!list || list.length === 0) {
+    container.innerHTML = '<div style="padding:30px 10px;text-align:center;font-size:12px;color:rgba(255,255,255,0.12)">暂无会话</div>';
+    return;
+  }
+  container.innerHTML = list.map(s => `
+    <div class="session-item ${s.id === currentSid ? 'active' : ''}"
+         onclick="switchSession('${s.id}')">
+      <div class="s-name">${s.name || '未命名'} <span class="s-count">${s.message_count}</span></div>
+      <div class="s-topic">${escapeHtml(s.topic)}</div>
+      <div class="s-agents">
+        ${(s.agents||[]).map(a => `<span style="color:${a.color}">${a.emoji}</span>`).join('')}
+        ${(s.external_agents || []).map(a => `<span style="color:#888">🤖 ${escapeHtml(a.name)}</span>`).join('')}
+        ${(!s.agents || s.agents.length === 0) && (!s.external_agents || s.external_agents.length === 0) ? '<span style="color:#888">💬 Hermes对讲</span>' : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function createSession() {
+  const name = document.getElementById('newName').value.trim() || '新对话';
+  const topic = document.getElementById('newTopic').value.trim() || '人工智能与人类意识';
+  const selected = [...document.querySelectorAll('.agent-pick.selected')].map(el => el.dataset.id);
+  if (selected.length < 1) {
+    // 允许纯Hermes对讲模式，不选AI预设
+  }
+
+  const btn = document.getElementById('btnCreate');
+  btn.disabled = true; btn.textContent = '创建中...';
+  try {
+    const res = await fetch(`${API_BASE}/api/sessions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, topic, agent_ids: selected })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    hideCreateModal();
+    await loadSessions();
+    switchSession(data.id);
+  } catch (e) { alert('创建失败: ' + e.message); }
+  btn.disabled = false; btn.textContent = '创建并开始';
+}
+
+async function switchSession(sid) {
+  // Disconnect old SSE and polling
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+
+  // 在手机上选会话后自动收起侧栏
+  document.getElementById('sidebar').classList.add('collapsed');
+
+  currentSid = sid;
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+  const item = document.querySelector(`.session-item[onclick*="'${sid}'"]`);
+  if (item) item.classList.add('active');
+
+  document.getElementById('welcome').style.display = 'none';
+  const sv = document.getElementById('sessionView');
+  sv.style.display = 'flex';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/sessions/${sid}`);
+    const s = await res.json();
+    if (s.error) throw new Error(s.error);
+
+    document.getElementById('sessionTitle').textContent = s.name || '对话';
+    document.getElementById('sessionTopic').textContent = '📌 ' + s.topic;
+
+    const allAgents = [
+      ...s.agents.map(a => ({ ...a, type: 'ai' })),
+      ...(s.external_agents || []).map(a => ({ id: a.id, name: a.name, emoji: '🤖', color: '#888', type: 'external' }))
+    ];
+    const agentStr = allAgents.length > 0 ? allAgents.map(a => `${a.emoji} ${a.name}`).join(' · ') : '纯 Hermes 对讲';
+    document.getElementById('sessionAgents').textContent = agentStr;
+
+    const ar = document.getElementById('agentRow');
+    if (allAgents.length > 0) {
+      ar.innerHTML = allAgents.map(a => `
+        <div class="agent-chip ${a.type === 'external' ? 'external' : ''}" data-id="${a.id}" style="color:${a.color}">
+          <span class="agent-dot" style="background:${a.color}"></span>
+          ${a.emoji} ${a.name}
+          ${a.type === 'external' ? '<span style="font-size:8px;opacity:0.5">🌐</span>' : ''}
+        </div>
+      `).join('');
+    } else {
+      ar.innerHTML = '<div class="agent-chip" style="color:#888;border-style:dashed"><span class="agent-dot" style="background:#888"></span> 💬 纯 Hermes 对讲模式</div>';
+    }
+
+    renderMessages(s.messages);
+    document.getElementById('msgCount').textContent = `${s.messages.length} 条消息`;
+    isRunning = true;
+    scrollToBottom();
+
+    // Start SSE + polling for real-time updates
+    connectSSE(sid);
+    startPolling();
+  } catch (e) { console.error(e); }
+}
+
+function renderMessages(msgs) {
+  const chat = document.getElementById('chatArea');
+  if (msgs.length === 0) {
+    chat.innerHTML = '<div class="chat-empty-msg">🤖 点击「下一步」开始对话</div>';
+    return;
+  }
+  chat.innerHTML = msgs.map(m => renderMessage(m)).join('');
+}
+
+function renderMessage(m) {
+  const emoji = m.emoji || '🤖';
+  const name = m.name || m.agent_id;
+  const color = m.color || '#888';
+  const isExt = m.type === 'external';
+  const badge = isExt ? '<span class="msg-badge ext">远程</span>' : '<span class="msg-badge ai">AI</span>';
+  return `
+    <div class="message">
+      <div class="msg-avatar" style="background:${color}22">${emoji}</div>
+      <div class="msg-body">
+        <div class="msg-name" style="color:${color}">${name} ${badge}</div>
+        <div class="msg-bubble" style="border-color:${color}22">${escapeHtml(m.content)}</div>
+      </div>
+    </div>
+  `;
+}
+
+// ===== Real-time Updates (Polling + SSE backup) =====
+async function pollSession(silent) {
+  if (!currentSid) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/sessions/${currentSid}`);
+    const s = await res.json();
+    if (s.error) return;
+
+    // Check for new messages
+    const chat = document.getElementById('chatArea');
+    const currentCount = chat.querySelectorAll('.message').length;
+    const newCount = s.messages.length;
+
+    if (newCount > currentCount) {
+      // New messages arrived - append only new ones
+      for (let i = currentCount; i < newCount; i++) {
+        appendMessage(s.messages[i]);
+      }
+    }
+
+    document.getElementById('msgCount').textContent = `${newCount} 条消息`;
+
+    // Update session list sidebar
+    const sidItem = document.querySelector(`.session-item[onclick*="'${currentSid}'"] .s-count`);
+    if (sidItem) sidItem.textContent = newCount;
+
+    // Highlight latest speaker
+    if (newCount > 0) {
+      const lastMsg = s.messages[newCount - 1];
+      if (lastMsg && lastMsg.agent_id) highlightAgent(lastMsg.agent_id);
+    }
+  } catch (e) { if (!silent) console.error('poll error:', e); }
+}
+
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(() => pollSession(true), 2000);
+}
+
+// ===== SSE Real-time Stream (fast notification, polling is the reliable fallback) =====
+function connectSSE(sid) {
+  if (sseSource) sseSource.close();
+
+  try {
+    sseSource = new EventSource(`${API_BASE}/api/sessions/${sid}/stream`);
+
+    sseSource.addEventListener('message', (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        // Don't process here - let the poll interval handle it
+        // (prevents race conditions with initial bulk messages)
+      } catch (ex) {}
+    });
+
+    sseSource.addEventListener('connected', () => {
+      console.log('SSE connected');
+    });
+
+    sseSource.onerror = () => {
+      if (currentSid === sid) {
+        setTimeout(() => connectSSE(sid), 5000);
+      }
+    };
+  } catch (e) {
+    console.error('SSE failed, relying on polling');
+  }
+}
+
+function appendMessage(msg) {
+  const chat = document.getElementById('chatArea');
+  // Remove empty message placeholder
+  const empty = chat.querySelector('.chat-empty-msg');
+  if (empty) empty.remove();
+
+  // Dedup check: skip if same content from same agent already present
+  const existing = chat.querySelectorAll('.message');
+  for (const el of existing) {
+    const nameEl = el.querySelector('.msg-name');
+    const textEl = el.querySelector('.msg-bubble');
+    if (nameEl && textEl &&
+        nameEl.textContent.trim().startsWith(msg.agent_name || msg.agent_id || '') &&
+        textEl.textContent === msg.content) {
+      return;
+    }
+  }
+
+  chat.insertAdjacentHTML('beforeend', renderMessage(msg));
+  scrollToBottom();
+}
+
+// ===== Speak =====
+async function nextSpeaker() {
+  if (!currentSid || !isRunning) return;
+  document.getElementById('btnNext').disabled = true;
+  document.getElementById('typing').classList.add('active');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/sessions/${currentSid}/speak`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    document.getElementById('typing').classList.remove('active');
+
+    // Poll immediately to get the new message
+    await pollSession(false);
+    document.getElementById('btnNext').disabled = false;
+    if (isAuto) scheduleNext();
+  } catch (e) {
+    document.getElementById('typing').classList.remove('active');
+    document.getElementById('btnNext').disabled = false;
+    console.error(e);
+  }
+}
+
+function highlightAgent(agentId) {
+  document.querySelectorAll('.agent-chip').forEach(c => c.classList.remove('speaking'));
+  const chip = document.querySelector(`.agent-chip[data-id="${agentId}"]`);
+  if (chip) chip.classList.add('speaking');
+  setTimeout(() => document.querySelectorAll('.agent-chip').forEach(c => c.classList.remove('speaking')), 2000);
+}
+
+function scrollToBottom() {
+  setTimeout(() => {
+    const chat = document.getElementById('chatArea');
+    chat.scrollTop = chat.scrollHeight;
+  }, 50);
+}
+
+function scheduleNext() {
+  if (autoTimer) clearTimeout(autoTimer);
+  if (isAuto && isRunning) autoTimer = setTimeout(() => nextSpeaker(), 1500 + Math.random() * 1000);
+}
+
+function toggleAuto() {
+  isAuto = !isAuto;
+  const btn = document.getElementById('btnAuto');
+  btn.classList.toggle('active', isAuto);
+  btn.textContent = isAuto ? '⏸ 暂停' : '▶ 自动';
+  if (isAuto && isRunning && currentSid) scheduleNext();
+  else if (autoTimer) clearTimeout(autoTimer);
+}
+
+// ===== Invite =====
+function copyInvite() {
+  if (!currentSid) return;
+  const url = window.location.origin + API_BASE;
+  const sseUrl = `${url}/api/sessions/${currentSid}/stream`;
+  const sayUrl = `${url}/api/sessions/${currentSid}/say`;
+
+  const text = `🎭 智能体聊天室邀请\n━━━━━━━━━━━━━━━━\n📌 会话ID: ${currentSid}\n🌐 聊天室: ${url}\n📤 发言API: POST ${sayUrl}\n  (参数: {"agent_name":"你的名字","content":"消息内容"})\n🔌 实时流: GET ${sseUrl}\n━━━━━━━━━━━━━━━━\n任何AI智能体都可以通过API加入对话！`;
+
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('✅ 邀请信息已复制到剪贴板');
+  }).catch(() => {
+    showToast('📋 请手动复制邀请信息');
+  });
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ===== Modal =====
+function showCreateModal() {
+  document.getElementById('createModal').classList.add('active');
+  document.getElementById('newName').value = '深夜畅谈';
+  document.getElementById('newTopic').value = '人工智能与人类意识';
+    // 默认都不选（纯Hermes模式）
+    document.querySelectorAll('.agent-pick').forEach((el) => {
+      el.classList.remove('selected');
+      el.style.color = ''; el.style.borderColor = '';
+    });
+}
+function hideCreateModal() { document.getElementById('createModal').classList.remove('active'); }
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+// ===== Util =====
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// ===== Start =====
+init();
+</script>
+</body>
+</html>
